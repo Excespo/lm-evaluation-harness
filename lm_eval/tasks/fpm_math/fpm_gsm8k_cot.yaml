@@ -1,0 +1,8 @@
+task:
+  fpm_gsm8k_cot
+include:
+  ../gsm8k/gsm8k-cot.yaml
+num_fewshot:
+  8
+generation_kwargs:
+  max_gen_toks: 512

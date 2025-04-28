@@ -1,5 +1,5 @@
 task: agieval_gaokao_mathcloze
-dataset_path: hails/agieval-gaokao-mathcloze
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/agieval/gaokao-mathcloze
 dataset_name: null
 output_type: generate_until
 training_split: null

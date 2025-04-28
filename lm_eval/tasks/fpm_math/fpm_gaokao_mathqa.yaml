@@ -1,0 +1,3 @@
+task: fpm_gaokao_mathqa
+include: ../agieval/gaokao-mathqa.yaml
+num_fewshot: 4

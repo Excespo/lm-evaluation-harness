@@ -270,6 +270,7 @@ class TaskManager:
                     ),
                     **config,
                 }
+            print("config:", config)
             if self._config_is_python_task(config):
                 if self._class_has_config_in_constructor(config["class"]):
                     task_object = config["class"](config=config)
@@ -493,7 +494,9 @@ class TaskManager:
             for f in file_list:
                 if f.endswith(".yaml"):
                     yaml_path = os.path.join(root, f)
+                    # print(f"yaml_path:\n{yaml_path}")
                     config = utils.load_yaml_config(yaml_path, mode="simple")
+                    # print(f"config:\n{config}")
                     if self._config_is_python_task(config):
                         # This is a python class config
                         task = config["task"]

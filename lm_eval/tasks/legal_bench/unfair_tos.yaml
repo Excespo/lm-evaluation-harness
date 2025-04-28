@@ -1,0 +1,16 @@
+task: unfair_tos
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/legal_bench/data/unfair_tos
+output_type: multiple_choice
+training_split: train
+test_split: test
+doc_to_text: "Clause:{{text}}\nQuestion:What type of legal clause is this?\nChoices: Arbitration, Unilateral change, Content removal, Jurisdiction, Choice of law, Limitation of liability, Unilateral termination, Contract by using, Other.\nAnswer:"
+doc_to_choice: ["Arbitration", "Unilateral change", "Content removal", "Jurisdiction", "Choice of law", "Limitation of liability", "Unilateral termination", "Contract by using", "Other"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

@@ -1,0 +1,11 @@
+group: fpm_medical
+task:
+  - pubmedqa
+  - medmcqa
+  - medqa_4options
+  - mmlu_medical
+num_fewshot: 5
+aggregate_metric_list:
+  - metric: acc
+    aggregation: mean
+    weight_by_size: True

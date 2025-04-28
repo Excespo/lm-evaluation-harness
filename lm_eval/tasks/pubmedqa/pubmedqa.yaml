@@ -1,10 +1,9 @@
 task: pubmedqa
-dataset_path: bigbio/pubmed_qa
-dataset_name: pubmed_qa_labeled_fold0_source
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/pubmedqa
+dataset_name: pqa_labeled
 output_type: multiple_choice
-training_split: train
-validation_split: validation
-test_split: test
+validation_split: train
+test_split: train
 doc_to_text: !function preprocess_pubmedqa.doc_to_text
 doc_to_target: final_decision
 doc_to_choice: ["yes", "no", "maybe"]

@@ -1,5 +1,5 @@
 task: medmcqa
-dataset_path: medmcqa
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/medmcqa
 output_type: multiple_choice
 training_split: train
 validation_split: validation

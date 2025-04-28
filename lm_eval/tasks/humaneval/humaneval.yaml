@@ -1,5 +1,5 @@
 task: humaneval
-dataset_path: openai/openai_humaneval
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/humaneval
 unsafe_code: true
 output_type: generate_until
 test_split: test

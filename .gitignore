@@ -1,7 +1,11 @@
 env
 *.pyc
 output/
+outputs/
+logs/
 data/
+fusion_results.json
+kernel_meta/
 lm_cache
 .idea
 build

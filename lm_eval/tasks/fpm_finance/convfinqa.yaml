@@ -1,0 +1,38 @@
+tag: fpm_finance
+task: convfinqa
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/sft/raw/finance/convfinqa/data
+output_type: generate_until
+training_split: train
+test_split: test
+doc_to_text: "Question: {{instruction}} {{input}}\nAnswer:"
+doc_to_target: "{{output}}"
+metric_list:
+  - metric: exact_match          
+    aggregation: mean            
+    higher_is_better: true       
+    ignore_case: true            # 忽略大小写差异
+    ignore_punctuation: false    # 不忽略标点符号
+    regexes_to_ignore:           
+      - ","                      # 忽略逗号（如 "1,000" → "1000"）
+      - "\\$"                    # 忽略美元符号（如 "$100" → "100"）
+      - "(?s).*#### "            # 忽略 "#### " 前的所有字符（匹配多行文本）
+      - "\\.$"                   # 忽略末尾的句号
+generation_kwargs:
+  until:
+    - "Question:"
+    - "</s>"
+    - "<|im_end|>"
+filter_list:
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "#### (\\-?[0-9\\.\\,]+)"
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        group_select: -1
+        regex_pattern: "(-?[$0-9.,]{2,})|(-?[0-9]+)"
+      - function: "take_first"
+metadata:
+  version: 3.0

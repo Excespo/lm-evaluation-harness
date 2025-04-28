@@ -458,6 +458,9 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         **request_caching_args,
     )
 
+    # print("type of results: ", type(results))
+    # print("results: ", results)
+
     if results is not None:
         if args.log_samples:
             samples = results.pop("samples")

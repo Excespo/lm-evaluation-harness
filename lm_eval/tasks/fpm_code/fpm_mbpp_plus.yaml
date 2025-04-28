@@ -1,0 +1,5 @@
+task: fpm_mbpp_plus
+include: ../mbpp/mbpp_plus.yaml
+num_fewshot: 0
+dataset_kwargs: 
+  trust_remote_code: true

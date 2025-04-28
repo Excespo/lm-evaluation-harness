@@ -1,0 +1,10 @@
+group: fpm_code
+task:
+  - fpm_humaneval
+  - fpm_humaneval_plus
+  - fpm_mbpp
+  - fpm_mbpp_plus
+aggregate_metric_list:
+  - metric: acc
+    aggregation: mean
+    weight_by_size: True

@@ -1,4 +1,4 @@
-dataset_path: Idavidrein/gpqa
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/gpqa
 tag: gpqa
 output_type: multiple_choice
 process_docs: !function utils.process_docs

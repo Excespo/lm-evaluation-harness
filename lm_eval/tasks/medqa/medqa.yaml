@@ -1,5 +1,5 @@
 task: medqa_4options
-dataset_path: GBaker/MedQA-USMLE-4-options-hf
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/MedQA-USMLE-4-options-hf
 output_type: multiple_choice
 training_split: train
 validation_split: validation

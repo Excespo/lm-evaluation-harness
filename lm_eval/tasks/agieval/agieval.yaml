@@ -1,3 +1,4 @@
+#删了matchcloze和math两个generate_utils的任务
 group: agieval
 task:
   - agieval_gaokao_biology
@@ -5,7 +6,6 @@ task:
   - agieval_gaokao_chinese
   - agieval_gaokao_geography
   - agieval_gaokao_history
-  - agieval_gaokao_mathcloze
   - agieval_gaokao_mathqa
   - agieval_gaokao_physics
   - agieval_jec_qa_ca
@@ -17,7 +17,6 @@ task:
   - agieval_lsat_ar
   - agieval_lsat_lr
   - agieval_lsat_rc
-  - agieval_math
   - agieval_sat_en_without_passage
   - agieval_sat_en
   - agieval_sat_math

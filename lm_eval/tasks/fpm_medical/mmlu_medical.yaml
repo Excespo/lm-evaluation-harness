@@ -1,0 +1,12 @@
+group: mmlu_medical
+task:
+  - mmlu_anatomy
+  - mmlu_clinical_knowledge
+  - mmlu_college_medicine
+  - mmlu_medical_genetics
+  - mmlu_professional_medicine
+  - mmlu_college_biology
+aggregate_metric_list:
+  - metric: acc
+    aggregation: mean
+    weight_by_size: True

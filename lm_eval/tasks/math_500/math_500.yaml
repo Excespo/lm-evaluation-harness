@@ -1,0 +1,25 @@
+task: math_500
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/Math-500
+process_docs: !function utils.process_docs
+output_type: generate_until 
+test_split: test
+doc_to_text: "Problem: {{problem}}\nSolution(Solution be brief under valid latex syntax, final answer must be boxed):"
+doc_to_target: "{{solution}}"
+generation_kwargs:
+  until:
+    - "Problem:"
+  do_sample: true
+  temperature: 0.6
+  top_p: 0.95
+  max_gen_toks: 1024 # 长上下文的场合大概是使用python code的情况, 否则一般不需要生成很长
+repeats: 16
+num_fewshot: 3
+metric_list:
+  - metric: !function utils.pass_at_k
+    aggregation: mean
+    higher_is_better: true
+    k: [1, 2, 4, 8]
+metadata:
+  version: 1.0
+dataset_kwargs:
+  trust_remote_code: true

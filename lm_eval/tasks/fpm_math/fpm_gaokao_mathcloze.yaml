@@ -1,0 +1,3 @@
+task: fpm_gaokao_mathcloze
+include: ../agieval/gaokao-mathcloze.yaml
+num_fewshot: 5

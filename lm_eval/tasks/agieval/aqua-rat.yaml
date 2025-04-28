@@ -1,5 +1,5 @@
 task: agieval_aqua_rat
-dataset_path: hails/agieval-aqua-rat
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/agieval/aqua-rat
 dataset_name: null
 output_type: multiple_choice
 training_split: null

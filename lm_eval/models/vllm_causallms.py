@@ -75,9 +75,9 @@ class VLLM(TemplateLM):
                 "Please install vllm via `pip install lm-eval[vllm]` or `pip install -e .[vllm]`"
             )
 
-        assert max_length is None or max_model_len is None, (
-            "Either max_length or max_model_len may be provided, but not both"
-        )
+        assert (
+            max_length is None or max_model_len is None
+        ), "Either max_length or max_model_len may be provided, but not both"
 
         self._max_length = max_model_len if max_model_len is not None else max_length
         self.tensor_parallel_size = int(tensor_parallel_size)
@@ -109,7 +109,9 @@ class VLLM(TemplateLM):
             eval_logger.warning(
                 "You might experience occasional issues with model weight downloading when data_parallel is in use. To ensure stable performance, run with data_parallel_size=1 until the weights are downloaded and cached."
             )
-            self.model_args["distributed_executor_backend"] = "ray"
+            # NOTE: for npu
+            # self.model_args["distributed_executor_backend"] = "ray"
+            self.model_args["distributed_executor_backend"] = "mp"
             self.batch_size = "auto"
             eval_logger.info("Manual batching is not compatible with data parallelism.")
 
@@ -142,9 +144,9 @@ class VLLM(TemplateLM):
         self._max_gen_toks = max_gen_toks
 
         if lora_local_path is not None:
-            assert parse_version(version("vllm")) > parse_version("0.3.0"), (
-                "lora adapters only compatible with vllm > v0.3.0."
-            )
+            assert parse_version(version("vllm")) > parse_version(
+                "0.3.0"
+            ), "lora adapters only compatible with vllm > v0.3.0."
             self.lora_request = LoRARequest("finetuned", 1, lora_local_path)
         else:
             self.lora_request = None
@@ -247,7 +249,8 @@ class VLLM(TemplateLM):
             # vLLM hangs if resources are set in ray.remote
             # also seems to only work with decorator and not with ray.remote() fn
             # see https://github.com/vllm-project/vllm/issues/973
-            @ray.remote
+            # NOTE: for npu
+            @ray.remote(resources={"NPU": 1})
             def run_inference_one_model(
                 model_args: dict,
                 sampling_params: SamplingParams,
@@ -524,12 +527,14 @@ class VLLM(TemplateLM):
             return getattr(logprob, "logprob", logprob)
 
         continuation_logprobs_dicts = [
-            {
-                token: coerce_logprob_to_num(logprob)
-                for token, logprob in logprob_dict.items()
-            }
-            if logprob_dict is not None
-            else None
+            (
+                {
+                    token: coerce_logprob_to_num(logprob)
+                    for token, logprob in logprob_dict.items()
+                }
+                if logprob_dict is not None
+                else None
+            )
             for logprob_dict in continuation_logprobs_dicts
         ]
 
