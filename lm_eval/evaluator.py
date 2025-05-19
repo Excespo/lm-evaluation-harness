@@ -78,6 +78,8 @@ def simple_evaluate(
     fewshot_random_seed: int = 1234,
     confirm_run_unsafe_code: bool = False,
     metadata: Optional[dict] = None,
+    path_to_fpm_monkey_patch: Optional[str] = None,
+    statistics_moe_experts: bool = False,
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -201,6 +203,7 @@ def simple_evaluate(
             eval_logger.warning("model_args not specified. Using defaults.")
             model_args = ""
 
+        # Convert model_args string to dict if needed
         if isinstance(model_args, dict):
             eval_logger.info(
                 f"Initializing {model} model, with arguments: {model_args}"

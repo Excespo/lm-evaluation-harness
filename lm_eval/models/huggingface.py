@@ -37,6 +37,7 @@ from lm_eval.models.utils import (
     handle_stop_sequences,
     pad_and_concat,
     stop_sequences_criteria,
+    load_monkey_patch_module
 )
 
 
@@ -92,6 +93,8 @@ class HFLM(TemplateLM):
         autogptq: Optional[Union[bool, str]] = False,
         gptqmodel: Optional[bool] = False,
         gguf_file: Optional[str] = None,
+        path_to_modeling_monkey_patch: Optional[str] = None,
+        path_to_config_monkey_path: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -295,6 +298,18 @@ class HFLM(TemplateLM):
             eval_logger.info(
                 f"Loglikelihood prefix token id used in evaluation: {self.prefix_token_id}"
             )
+
+        # Model Monkey Patch
+        if path_to_modeling_monkey_patch is not None and path_to_config_monkey_path is not None:
+            eval_logger.info(
+                f"Applying modeling monkey patch from {path_to_modeling_monkey_patch}",
+                f", and config monkey patch from {path_to_config_monkey_patch}"
+            )
+            module_fpm_modeling = load_monkey_patch_module(path_to_modeling_monkey_patch)
+            module_fpm_modeling.apply_deepspeed_moe_patch()
+            module_fpm_config = load_monkey_patch_module(path_to_modeling_monkey_patch)
+            module_fpm_config.apply_fpm_config_patch()
+
 
     def _get_accelerate_args(
         self,

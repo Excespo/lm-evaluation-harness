@@ -729,3 +729,15 @@ def handle_stop_sequences(
     if eos is not None and eos not in until:
         until.append(eos)
     return until
+
+
+def load_monkey_patch_module(script_path):
+
+    eval_logger.info(f"Applying monkey patch from {script_path}")
+    
+    from importlib.util import spec_from_file_location, module_from_spec
+    spec = spec_from_file_location("fpm_monkey_patch", script_path)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    
+    return module

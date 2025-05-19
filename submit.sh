@@ -15,18 +15,19 @@ declare -A tasks=(
     # ["mmlu_generative"]="hf"#"--num_fewshot 5"
     # ["mmlu_pro"]="vllm"#"--num_fewshot 5"
     # # CODE
-    ["humaneval"]="vllm"#"--gen_kwargs do_sample=True,temperature=0.1 --trust_remote_code --confirm_run_unsafe_code"
+    # ["humaneval"]="vllm"#"--gen_kwargs do_sample=True,temperature=0.1 --trust_remote_code --confirm_run_unsafe_code"
     # ["humaneval_plus"]="vllm"#"--gen_kwargs do_sample=True,temperature=0.1 --trust_remote_code --confirm_run_unsafe_code"
     # ["mbpp"]="vllm"#"--num_fewshot 0 --trust_remote_code --confirm_run_unsafe_code"
     # ["mbpp_plus"]="vllm"#"--num_fewshot 0 --trust_remote_code --confirm_run_unsafe_code"
     # ["fpm_code"]="hf"#"--confirm_run_unsafe_code"
+    ["fpm_mbpp"]="vllm"#"--confirm_run_unsafe_code"
     # # MATH
     # ["gsm8k_cot"]="vllm"#"--num_fewshot 8 --gen_kwargs max_gen_toks=512"
     # ["gsm8k"]="vllm"#"--num_fewshot 8 --gen_kwargs max_gen_toks=512"
     # ["gpqa_diamond_cot_n_shot"]="vllm"#"--num_fewshot 4"
     # ["hendrycks_math"]="vllm"#"--num_fewshot 4"
     # ["math_500"]="vllm"#""
-    # ["fpm_gsm8k"]="vllm"#""
+    # ["fpm_gsm8k"]="vllm"#"--num_fewshot 4"
     # ["cmath"]="vllm"#""
     # ["fpm_hendrycks_math"]="vllm"#""
     # ["fpm_gaokao_mathqa"]="vllm"#""
@@ -69,6 +70,7 @@ generate() {
         --model_args "$model_args" \
         --tasks "$1" \
         --log_samples \
+        --show_config \
         --output_path "$output_dir/$1" \
         "$3"
 }

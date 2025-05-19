@@ -5,4 +5,10 @@ include:
 num_fewshot:
   8
 generation_kwargs:
+  until:
+    - "Question:"
+    - "</s>"
+    - "<|im_end|>"
+  do_sample: false
+  temperature: 0.0
   max_gen_toks: 512
