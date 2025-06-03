@@ -1,5 +1,5 @@
 task: nq_open
-dataset_path: nq_open
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/nq_open
 output_type: generate_until
 training_split: train
 validation_split: validation

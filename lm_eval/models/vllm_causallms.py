@@ -65,6 +65,8 @@ class VLLM(TemplateLM):
         device: str = "cuda",
         data_parallel_size: int = 1,
         lora_local_path: str = None,
+        path_to_modeling_monkey_patch: Optional[str] = None,
+        path_to_config_monkey_patch: Optional[str] = None,
         **kwargs,
     ):
         super().__init__()
@@ -74,6 +76,21 @@ class VLLM(TemplateLM):
                 "attempted to use 'vllm' LM type, but package `vllm` is not installed. "
                 "Please install vllm via `pip install lm-eval[vllm]` or `pip install -e .[vllm]`"
             )
+        
+        # Model Monkey Patch
+        if path_to_modeling_monkey_patch is not None and path_to_config_monkey_patch is not None:
+            from lm_eval.models.utils import load_monkey_patch_module
+            apply_modeling = getattr(
+                load_monkey_patch_module(path_to_modeling_monkey_patch), "apply"
+            )
+            apply_config = getattr(
+                load_monkey_patch_module(path_to_config_monkey_patch), "apply"
+            )
+            eval_logger.info(
+                f"Init ds distributed, applying modeling monkey {apply_modeling} patch from {path_to_modeling_monkey_patch}, applying config monkey patch {apply_config} from {path_to_config_monkey_patch}"
+            )
+            apply_modeling()
+            apply_config()
 
         assert (
             max_length is None or max_model_len is None

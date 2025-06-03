@@ -1,5 +1,5 @@
 task: triviaqa
-dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/trivia_qa
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/trivia_qa
 dataset_name: rc.nocontext
 output_type: generate_until
 training_split: train

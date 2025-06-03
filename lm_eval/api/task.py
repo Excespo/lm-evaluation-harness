@@ -393,6 +393,7 @@ class Task(abc.ABC):
         fewshot_as_multiturn: bool = False,
         chat_template: Optional[Callable] = None,
         tokenizer_name: str = "",
+        use_experts: str = ""
     ) -> None:
         """Build a set of Instances for a task, and store them in task.instances"""
 
@@ -463,6 +464,7 @@ class Task(abc.ABC):
                 metadata=(self.config["task"], doc_id, self.config.repeats),
                 apply_chat_template=apply_chat_template,
                 chat_template=chat_template,
+                use_experts=use_experts
             )
 
             if not isinstance(inst, list):
@@ -1398,12 +1400,21 @@ class ConfigurableTask(Task):
             else:
                 return utils.apply_template(gen_prefix, doc)
         return None
+    
+    def _create_to_experts_mask(self, use_experts):
+        def parse(experts_str):
+            if experts_str == "":
+                return {}
+            return {experts_str: -1}
+        return parse(use_experts)
+
 
     def construct_requests(
         self, doc: dict, ctx: str, **kwargs
     ) -> Union[List[Instance], Instance]:
         apply_chat_template = kwargs.pop("apply_chat_template", False)
         chat_template: Callable | None = kwargs.pop("chat_template", None)
+        use_experts = kwargs.pop("use_experts", "")
 
         aux_arguments = None
 
@@ -1450,6 +1461,7 @@ class ConfigurableTask(Task):
                 arguments.extend(aux_arguments)
 
         elif self.OUTPUT_TYPE == "generate_until":
+            # eval_logger.debug(f"For generate_until, {ctx = }, {self.config}")
             arguments = (ctx, deepcopy(self.config.generation_kwargs))
 
         multimodal_arg = {}
@@ -1474,6 +1486,13 @@ class ConfigurableTask(Task):
                 arguments = [arg + (multimodal_arg,) for arg in arguments]
             else:
                 arguments = arguments + (multimodal_arg,)
+
+        if use_experts:
+            use_experts = self._create_to_experts_mask(use_experts)
+            if isinstance(arguments, list):
+                arguments = [arg + (use_experts,) for arg in arguments]
+            else:
+                arguments = arguments + (use_experts,)
 
         if self.OUTPUT_TYPE == "multiple_choice":
             request_list = [

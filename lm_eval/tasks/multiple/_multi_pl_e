@@ -1,4 +1,4 @@
-dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/humaneval/MultiPL-E/DATASET_NAME
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/humaneval/MultiPL-E/DATASET_NAME
 output_type: generate_until
 test_split: test
 doc_to_text: "{{prompt}}"

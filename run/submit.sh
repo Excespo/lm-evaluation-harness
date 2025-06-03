@@ -20,7 +20,7 @@ declare -A tasks=(
     # ["mbpp"]="vllm"#"--num_fewshot 0 --trust_remote_code --confirm_run_unsafe_code"
     # ["mbpp_plus"]="vllm"#"--num_fewshot 0 --trust_remote_code --confirm_run_unsafe_code"
     # ["fpm_code"]="hf"#"--confirm_run_unsafe_code"
-    ["fpm_mbpp"]="vllm"#"--confirm_run_unsafe_code"
+    # ["fpm_mbpp"]="vllm"#"--confirm_run_unsafe_code"
     # # MATH
     # ["gsm8k_cot"]="vllm"#"--num_fewshot 8 --gen_kwargs max_gen_toks=512"
     # ["gsm8k"]="vllm"#"--num_fewshot 8 --gen_kwargs max_gen_toks=512"
@@ -65,7 +65,7 @@ generate() {
     fi
     
     setup_npu="source /usr/local/Ascend/ascend-toolkit/set_env.sh && source /usr/local/Ascend/nnal/atb/set_env.sh"
-    setup_eval="export HCCL_CONNECT_TIMEOUT=3000 && export HF_ALLOW_CODE_EVAL=1 && export HF_DATASET_CACHE=/aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/cache && export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"
+    setup_eval="export HCCL_CONNECT_TIMEOUT=3000 && export HF_ALLOW_CODE_EVAL=1 && export HF_DATASET_CACHE=/aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/cache && export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"
     echo "$setup_npu && $setup_eval && $launch" \
         --model_args "$model_args" \
         --tasks "$1" \

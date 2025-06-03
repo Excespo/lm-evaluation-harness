@@ -270,7 +270,7 @@ class TaskManager:
                     ),
                     **config,
                 }
-            print("config:", config)
+            # print("config:", config)
             if self._config_is_python_task(config):
                 if self._class_has_config_in_constructor(config["class"]):
                     task_object = config["class"](config=config)

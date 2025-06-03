@@ -367,7 +367,21 @@ class TemplateLM(LM):
         self, requests, disable_tqdm: bool = False
     ) -> List[Tuple[float, bool]]:
         new_reqs = []
-        for context, continuation in [req.args for req in requests]:
+        for req in requests:
+            # Handle different argument lengths (with or without use_experts)
+            if len(req.args) == 3:
+                # Format: (context, continuation, use_experts)
+                context, continuation, use_experts = req.args
+                # print(f"{context = }")
+                # print(f"{continuation = }")
+                # print(f"{use_experts = }")
+            elif len(req.args) == 2:
+                # Format: (context, continuation) - no use_experts
+                context, continuation = req.args
+                use_experts = {}  # Empty dict for no expert specification
+            else:
+                raise ValueError(f"Unexpected argument format in request: {req.args}")
+            
             if context == "":
                 # BOS or EOS as context
                 context_enc, continuation_enc = (
@@ -377,7 +391,7 @@ class TemplateLM(LM):
             else:
                 context_enc, continuation_enc = self._encode_pair(context, continuation)
 
-            new_reqs.append(((context, continuation), context_enc, continuation_enc))
+            new_reqs.append(((context, continuation), context_enc, continuation_enc, use_experts))
 
         return self._loglikelihood_tokens(new_reqs, disable_tqdm=disable_tqdm)
 

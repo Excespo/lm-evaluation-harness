@@ -492,7 +492,7 @@ class Collator:
                 # yield each along with its corresponding args.
                 multilogits = logits.expand(cache_size, -1, -1).chunk(cache_size)
                 indices, req_str, cont_toks = zip(
-                    *[(x[0], x[1][0], x[-1][-1]) for x in cache_hit]
+                    *[(x[0], x[1][0], x[1][2]) for x in cache_hit]
                 )
                 self._reorder_indices.extend(indices)
                 for c_key, cont_tok, logit in zip(req_str, cont_toks, multilogits):
@@ -732,8 +732,6 @@ def handle_stop_sequences(
 
 
 def load_monkey_patch_module(script_path):
-
-    eval_logger.info(f"Applying monkey patch from {script_path}")
     
     from importlib.util import spec_from_file_location, module_from_spec
     spec = spec_from_file_location("fpm_monkey_patch", script_path)

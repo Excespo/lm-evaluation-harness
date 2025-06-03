@@ -1,5 +1,5 @@
 task: winogrande
-dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/winogrande
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/winogrande
 dataset_name: winogrande_xl
 output_type: multiple_choice
 training_split: train

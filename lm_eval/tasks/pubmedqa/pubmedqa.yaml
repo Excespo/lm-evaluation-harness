@@ -1,5 +1,5 @@
 task: pubmedqa
-dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/pubmedqa
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/pubmedqa
 dataset_name: pqa_labeled
 output_type: multiple_choice
 validation_split: train

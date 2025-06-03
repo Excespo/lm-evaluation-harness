@@ -42,6 +42,7 @@ from lm_eval.models.utils import (
 
 
 eval_logger = logging.getLogger(__name__)
+transformers.logging.set_verbosity_error()
 
 
 @register_model("hf-auto", "hf", "huggingface")
@@ -94,10 +95,25 @@ class HFLM(TemplateLM):
         gptqmodel: Optional[bool] = False,
         gguf_file: Optional[str] = None,
         path_to_modeling_monkey_patch: Optional[str] = None,
-        path_to_config_monkey_path: Optional[str] = None,
+        path_to_config_monkey_patch: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__()
+
+        # Model Monkey Patch
+        if path_to_modeling_monkey_patch is not None and path_to_config_monkey_patch is not None:
+            import deepspeed
+            # if not hasattr(deepspeed.utils, "groups") or not deepspeed.utils.groups.is_initialized():
+                # deepspeed.utils.groups.initialize(ep_size=1)
+            deepspeed.init_distributed()
+            apply_modeling = getattr(load_monkey_patch_module(path_to_modeling_monkey_patch), "apply")
+            apply_config = getattr(load_monkey_patch_module(path_to_config_monkey_patch), "apply")
+            eval_logger.info(
+                f"Init ds distributed, applying modeling monkey {apply_modeling} patch from {path_to_modeling_monkey_patch}, applying config monkey patch {apply_config} from {path_to_config_monkey_patch}"
+            )
+            apply_modeling()
+            apply_config()
+
         # optionally: take in an already-initialized transformers.PreTrainedModel
         if not isinstance(pretrained, str):
             eval_logger.warning(
@@ -298,17 +314,9 @@ class HFLM(TemplateLM):
             eval_logger.info(
                 f"Loglikelihood prefix token id used in evaluation: {self.prefix_token_id}"
             )
-
-        # Model Monkey Patch
-        if path_to_modeling_monkey_patch is not None and path_to_config_monkey_path is not None:
-            eval_logger.info(
-                f"Applying modeling monkey patch from {path_to_modeling_monkey_patch}",
-                f", and config monkey patch from {path_to_config_monkey_patch}"
-            )
-            module_fpm_modeling = load_monkey_patch_module(path_to_modeling_monkey_patch)
-            module_fpm_modeling.apply_deepspeed_moe_patch()
-            module_fpm_config = load_monkey_patch_module(path_to_modeling_monkey_patch)
-            module_fpm_config.apply_fpm_config_patch()
+        
+        # Cache for experts_mask to avoid recomputation
+        self._experts_mask_cache = {}
 
 
     def _get_accelerate_args(
@@ -748,6 +756,10 @@ class HFLM(TemplateLM):
             )
         return None
 
+    def _get_function_to_expert_indices(self):
+        
+        return getattr(self.model.config, "function_to_expert_indices", None)
+
     def _detect_batch_size(self, requests=None, pos: int = 0):
         if requests:
             _, context_enc, continuation_enc = requests[pos]
@@ -871,7 +883,7 @@ class HFLM(TemplateLM):
     def tok_decode(self, tokens, skip_special_tokens=True):
         return self.tokenizer.decode(tokens, skip_special_tokens=skip_special_tokens)
 
-    def _model_call(self, inps, attn_mask=None, labels=None):
+    def _model_call(self, inps, attn_mask=None, labels=None, **kwargs):
         """
         :param inps: torch.Tensor
             A torch tensor of shape [batch, (sequence_ctx + sequence_cont)] or of shape
@@ -891,11 +903,11 @@ class HFLM(TemplateLM):
                 assert attn_mask is not None and labels is not None
                 assert self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM
                 return self.model(
-                    input_ids=inps, attention_mask=attn_mask, labels=labels
+                    input_ids=inps, attention_mask=attn_mask, labels=labels, **kwargs
                 ).logits
             else:
                 assert self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
-                return self.model(inps).logits
+                return self.model(inps, **kwargs).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
         # temperature = 0.0 if not set
@@ -911,10 +923,29 @@ class HFLM(TemplateLM):
 
         if do_sample is False and generation_kwargs.get("temperature") == 0.0:
             generation_kwargs.pop("temperature")
+            
         # build stopping criteria
         stopping_criteria = stop_sequences_criteria(
             self.tokenizer, stop, context.shape[1], context.shape[0]
         )
+        
+        # # Process experts_mask if provided
+        # experts_mask = generation_kwargs.pop("experts_mask", None)
+        # if experts_mask is not None:
+        #     eval_logger.info(f"Making experts mask for {experts_mask}")
+        #     self.model._create_experts_mask_from_string(experts_mask)
+            
+        #     # Ensure experts_mask is on the correct device
+        #     if hasattr(self.model, "experts_mask") and self.model.experts_mask is not None:
+        #         if self.model.experts_mask.device != context.device:
+        #             eval_logger.info(f"Moving experts_mask from {self.model.experts_mask.device} to {context.device}")
+        #             self.model.experts_mask = self.model.experts_mask.to(context.device)
+                
+        #         # Add the tensor experts_mask back to generation_kwargs
+        #         generation_kwargs["experts_mask"] = self.model.experts_mask
+        #         eval_logger.info(f"Added experts_mask to generation_kwargs: {generation_kwargs['experts_mask']}")
+
+        # Generate the output
         return self.model.generate(
             input_ids=context,
             max_length=max_length,
@@ -1049,14 +1080,14 @@ class HFLM(TemplateLM):
 
     def _loglikelihood_tokens(
         self,
-        requests: List[Tuple[Tuple[str, str], List[int], List[int]]],
+        requests: List[Tuple[Tuple[str, str], List[int], List[int], dict]],
         disable_tqdm: bool = False,
         override_bs: int = None,
     ) -> List[Tuple[float, bool]]:
         # TODO: implement some kind of efficient-request-middleware that lumps together requests with the same context
         res = []
 
-        def _collate(req: Tuple[Tuple[str, str], List[int], List[int]]):
+        def _collate(req: Tuple[Tuple[str, str], List[int], List[int], dict]):
             """Defines the key for the sorted method"""
             # the negative sign on len(toks) sorts descending - this has a few advantages:
             # - time estimates will always be over not underestimates, which is more useful for planning
@@ -1068,13 +1099,13 @@ class HFLM(TemplateLM):
             toks = req[1] + req[2]
             return -len(toks), tuple(toks)
 
-        def _lookup_one_token_cont(req: Tuple[Tuple[str, str], List[int], List[int]]):
+        def _lookup_one_token_cont(req: Tuple[Tuple[str, str], List[int], List[int], dict]):
             """Defines the key to group and lookup one-token continuations"""
             # Use with group_by="contexts" (optional)"
             # allows for the creation of a lookup, so we can reuse logits in case of one-token continuations.
             # speeds up some multiple-choice tasks proportionally to the number of choices.
             # groups requests by context+continuation[:-1] and infer on one request/group.
-            return req[-2] + req[-1][:-1]
+            return req[1] + req[2][:-1]
 
         re_ord = Collator(
             requests,
@@ -1123,7 +1154,12 @@ class HFLM(TemplateLM):
             # tensors, then we pack them together into a batch, call the model, and then pick it all apart
             # again because vectorizing is annoying
 
-            for _, context_enc, continuation_enc in chunk:
+            # Extract use_experts from chunk
+            use_experts_list = []
+            for _, context_enc, continuation_enc, use_experts in chunk:
+                use_experts_list.append(use_experts)
+            
+            for _, context_enc, continuation_enc, _ in chunk:
                 # sanity check
                 assert len(context_enc) > 0
                 assert len(continuation_enc) > 0
@@ -1211,11 +1247,21 @@ class HFLM(TemplateLM):
                     "labels": batched_conts,
                 }
 
+            # Handle experts mask for MoE models
+            # Create experts masks for the batch
+            experts_mask_list = [self._create_experts_mask_from_parsed_str(
+                use_experts, self._get_function_to_expert_indices()
+            ) for use_experts in use_experts_list]
+            if not any(m is None for m in experts_mask_list):
+                batch_experts_mask = torch.cat(experts_mask_list, dim=0).to(self.device)
+                call_kwargs["experts_mask"] = batch_experts_mask
+                # print(f"{call_kwargs = }")
+
             multi_logits = F.log_softmax(
                 self._model_call(batched_inps, **call_kwargs), dim=-1
             )  # [batch, padding_length (inp or cont), vocab]
 
-            for (request_str, ctx_tokens, _), logits, inplen, cont_toks in zip(
+            for (request_str, ctx_tokens, _, _), logits, inplen, cont_toks in zip(
                 chunk, multi_logits, inplens, cont_toks_list
             ):
                 # Slice to original seq length
@@ -1246,6 +1292,8 @@ class HFLM(TemplateLM):
                     cont_toks=cont_toks,
                     logits=logits,
                 ):
+                    # print(f"{request_str = }")
+                    # print(f"{cont_toks = }")
                     cont_toks = torch.tensor(
                         cont_toks, dtype=torch.long, device=self.device
                     ).unsqueeze(0)  # [1, seq]
@@ -1274,13 +1322,63 @@ class HFLM(TemplateLM):
         pbar.close()
 
         return re_ord.get_original(res)
+    
+    def _create_experts_mask_from_parsed_str(self, use_experts, function_to_expert_indices):
+        if function_to_expert_indices is None:
+            return None
+        # Create cache key from use_experts
+        cache_key = frozenset(use_experts.items())
+        
+        # Check cache first
+        if cache_key in self._experts_mask_cache:
+            return self._experts_mask_cache[cache_key]
+
+        def _flex_get_item(_list, key):
+            if key == -1:
+                return _list
+            elif isinstance(_list, list):
+                return [_list[i] for i in key]
+            else:
+                return _list[key]
+        
+        # Get all expert indices once
+        all_expert_indices = sum(function_to_expert_indices.values(), [])
+        num_experts = len(all_expert_indices)
+        
+        # Collect expert indices
+        expert_indices = []
+        for func, local_ids in use_experts.items():
+            assert local_ids == -1, NotImplementedError
+            global_expert_indices = function_to_expert_indices[func]
+            expert_indices += _flex_get_item(global_expert_indices, local_ids)
+
+        # Handle empty case
+        if not expert_indices:  # if not assigned, parsed use_experts is {}, should be specially dealt
+            experts_mask = torch.zeros((1, num_experts), dtype=torch.float32, device=self.device)
+        else:
+            # Optimized mask creation: create on CPU first, then move to device
+            # This is faster for large tensors
+            experts_mask = torch.full(
+                (1, num_experts), 
+                float("-inf"), 
+                dtype=torch.float32
+            )
+            # Set values directly using indexing (more efficient than scatter)
+            experts_mask[0, expert_indices] = 0.0
+            # Move to device once
+            experts_mask = experts_mask.to(self.device)
+
+        # Cache the result
+        self._experts_mask_cache[cache_key] = experts_mask
+        
+        return experts_mask
 
     def generate_until(
         self, requests: List[Instance], disable_tqdm: bool = False
     ) -> List[str]:
         res = []
 
-        def _collate(req: Tuple[str, dict]):
+        def _collate(req: Tuple[str, dict, dict]):
             """Defines the key for the sorted method"""
             # the negative sign on len(toks) sorts descending - this has a few advantages:
             # - time estimates will always be over not underestimates, which is more useful for planning
@@ -1320,20 +1418,42 @@ class HFLM(TemplateLM):
         # we group requests by their generation_kwargs,
         # so that we don't try to execute e.g. greedy sampling and temp=0.8 sampling
         # in the same batch.
-        # group_fn=lambda x: x[1] -> x=(context, gen_kwargs)
+        # group_fn=lambda x: x[1] -> x=(context, gen_kwargs, use_experts)
         re_ords = Collator(
             [reg.args for reg in requests],
             sort_fn=_collate,
             group_by="gen_kwargs",
-            group_fn=lambda x: x[1],
+            group_fn=lambda x: x[1],  # x is req=(context, gen_kwargs, use_experts), x[1] is gen_kwargs
         )
         chunks = re_ords.get_batched(n=batch_size, batch_fn=batch_fn)
         eos = self.tok_decode(self.eot_token_id, skip_special_tokens=False)
         for chunk in chunks:
-            contexts, all_gen_kwargs = zip(*chunk)
+            # Handle different argument lengths (with or without use_experts)
+            if len(chunk[0]) == 3:
+                # Format: (context, gen_kwargs, use_experts)
+                contexts, all_gen_kwargs, use_experts = zip(*chunk)
+            elif len(chunk[0]) == 2:
+                # Format: (context, gen_kwargs) - no use_experts
+                contexts, all_gen_kwargs = zip(*chunk)
+                use_experts = [{}] * len(contexts)  # Empty dict for each context
+            else:
+                raise ValueError(f"Unexpected argument format in chunk: {chunk[0]}")
+            
             # we assume all gen kwargs in the batch are the same
             # this is safe to assume because the `grouper` object ensures it.
             gen_kwargs = all_gen_kwargs[0]
+            
+            # Create experts_masks for the batch
+            experts_mask_list = [self._create_experts_mask_from_parsed_str(
+                use, self._get_function_to_expert_indices()
+            ) for use in use_experts]
+            if all(m is not None for m in experts_mask_list):
+                # print(f"{experts_mask_list = }")
+                batch_experts_mask = torch.cat(experts_mask_list, dim=0).to(self.device)
+                gen_kwargs = copy.deepcopy(gen_kwargs)  # Don't modify the original
+                gen_kwargs["experts_mask"] = batch_experts_mask
+                # print(f"{batch_experts_mask = }")
+
             # unpack our keyword arguments.
             if isinstance(gen_kwargs, dict):
                 kwargs = copy.deepcopy(gen_kwargs)  # edge case for repeats > 1

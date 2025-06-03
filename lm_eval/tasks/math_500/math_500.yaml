@@ -1,5 +1,5 @@
 task: math_500
-dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lm_eval/Math-500
+dataset_path: /aistor/sjtu/hpc_stor01/home/luoyijie/data/lm_eval/Math-500
 process_docs: !function utils.process_docs
 output_type: generate_until 
 test_split: test

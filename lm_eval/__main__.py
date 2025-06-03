@@ -17,6 +17,7 @@ from lm_eval.utils import (
 )
 
 
+
 def try_parse_json(value: str) -> Union[str, dict, None]:
     if value is None:
         return None
@@ -291,11 +292,22 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="""JSON string metadata to pass to task configs, for example '{"max_seq_lengths":[4096,8192]}'. Will be merged with model_args. Can also be set in task config.""",
     )
+    # parser.add_argument(
+    #     "--path_to_model_monkey_patch",
+    #     type=str,
+    #     default=None,
+    #     help="Path to modeling monkey patch python file"
+    # )
+    # parser.add_argument(
+    #     "--path_to_config_monkey_patch",
+    #     type=str,
+    #     default=None,
+    #     help="Path to config monkey patch python file"
+    # )
     parser.add_argument(
-        "--path_to_fpm_monkey_patch",
+        "--use_experts",
         type=str,
-        default=None,
-        help="Path to FPM monkey patch python file on Qwen2.5 dense model"
+        help="Choose the experts to use, givne under format 'math:0,math:1,code:0,law:1'"
     )
     parser.add_argument(
         "--statistics_moe_experts",
@@ -323,6 +335,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
 
     utils.setup_logging(args.verbosity)
     eval_logger = logging.getLogger(__name__)
+    eval_logger.setLevel(logging.INFO)
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     # update the evaluation tracker args with the output path and the HF token
@@ -440,6 +453,9 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         cache_requests=args.cache_requests
     )
 
+    if args.use_experts:
+        assert len(args.use_experts.split(",")) == 1, NotImplementedError("Only support use up one kind of experts at a time")
+
     results = evaluator.simple_evaluate(
         model=args.model,
         model_args=args.model_args,
@@ -466,8 +482,8 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         fewshot_random_seed=args.seed[3],
         confirm_run_unsafe_code=args.confirm_run_unsafe_code,
         metadata=metadata,
-        path_to_fpm_monkey_patch=args.path_to_fpm_monkey_patch,
         statistics_moe_experts=args.statistics_moe_experts,
+        use_experts=args.use_experts,
         **request_caching_args,
     )
 
@@ -492,12 +508,15 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
             except Exception as e:
                 eval_logger.info(f"Logging to Weights and Biases failed due to {e}")
 
+
+        eval_logger.debug(f"logging aggregated results, args.log_samples is {args.log_samples}, samples==None is {samples == None}")
         evaluation_tracker.save_results_aggregated(
             results=results, samples=samples if args.log_samples else None
         )
 
         if args.log_samples:
             for task_name, config in results["configs"].items():
+                eval_logger.debug(f"logging aggregated samples for task {task_name} and config {config}")
                 evaluation_tracker.save_results_samples(
                     task_name=task_name, samples=samples[task_name]
                 )
@@ -511,6 +530,9 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         print(
             f"{args.model} ({args.model_args}), gen_kwargs: ({args.gen_kwargs}), limit: {args.limit}, num_fewshot: {args.num_fewshot}, "
             f"batch_size: {args.batch_size}{f' ({batch_sizes})' if batch_sizes else ''}"
+        )
+        print(
+            f"use_experts: {args.use_experts}"
         )
         print(make_table(results))
         if "groups" in results:

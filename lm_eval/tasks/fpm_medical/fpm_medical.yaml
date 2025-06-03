@@ -3,7 +3,6 @@ task:
   - pubmedqa
   - medmcqa
   - medqa_4options
-  - mmlu_medical
 num_fewshot: 5
 aggregate_metric_list:
   - metric: acc
