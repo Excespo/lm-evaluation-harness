@@ -1,0 +1,3 @@
+group: fpm_wiki_history
+task:
+  - nq_open_history 

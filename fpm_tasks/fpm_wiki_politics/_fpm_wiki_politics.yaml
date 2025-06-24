@@ -1,0 +1,3 @@
+group: fpm_wiki_politics
+task:
+  - nq_open_politics 

@@ -1,0 +1,3 @@
+group: fpm_wiki_literature
+task:
+  - nq_open_literature 

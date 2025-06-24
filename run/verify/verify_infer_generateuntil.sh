@@ -11,11 +11,11 @@ modeling_patch=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/src/model/moe_monke
 config_patch=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/src/model/config_patch.py
 
 accelerate launch -m lm_eval --model hf --batch_size 8 \
-    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/fpm/Qwen2.5-MoE-5.7B-clone-no-shared-math-as-common-init,dtype=bfloat16,path_to_modeling_monkey_patch=$modeling_patch,path_to_config_monkey_patch=$config_patch \
+    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/fpm/Qwen2.5-MoE-5.7B-clone-no-shared-medical-as-common-init,dtype=bfloat16,path_to_modeling_monkey_patch=$modeling_patch,path_to_config_monkey_patch=$config_patch \
     --tasks nq_open  --num_fewshot 5 \
-    --log_samples --output_path outputs/verify_infer/nq_open --use_experts math
+    --log_samples --output_path outputs/verify_infer/nq_open --use_experts medical
 
 accelerate launch -m lm_eval --model hf --batch_size 8 \
-    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/Qwen2.5-Cpt-OWM-Math-1.5B-final,dtype=bfloat16 \
+    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/Qwen2.5-Cpt-Medical-1.5B-final,dtype=bfloat16 \
     --tasks nq_open  --num_fewshot 5 \
     --log_samples --output_path outputs/verify_infer/nq_open

@@ -1,0 +1,6 @@
+group: fpm_wiki
+task:
+  - fpm_wiki_history
+  - fpm_wiki_geography
+  - fpm_wiki_literature
+  - fpm_wiki_politics 

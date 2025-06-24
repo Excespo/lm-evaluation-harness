@@ -1,0 +1,3 @@
+group: fpm_wiki_geography
+task:
+  - nq_open_geography 

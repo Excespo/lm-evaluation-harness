@@ -292,18 +292,6 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="""JSON string metadata to pass to task configs, for example '{"max_seq_lengths":[4096,8192]}'. Will be merged with model_args. Can also be set in task config.""",
     )
-    # parser.add_argument(
-    #     "--path_to_model_monkey_patch",
-    #     type=str,
-    #     default=None,
-    #     help="Path to modeling monkey patch python file"
-    # )
-    # parser.add_argument(
-    #     "--path_to_config_monkey_patch",
-    #     type=str,
-    #     default=None,
-    #     help="Path to config monkey patch python file"
-    # )
     parser.add_argument(
         "--use_experts",
         type=str,
@@ -480,8 +468,8 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         numpy_random_seed=args.seed[1],
         torch_random_seed=args.seed[2],
         fewshot_random_seed=args.seed[3],
+        output_path=args.output_path,
         confirm_run_unsafe_code=args.confirm_run_unsafe_code,
-        metadata=metadata,
         statistics_moe_experts=args.statistics_moe_experts,
         use_experts=args.use_experts,
         **request_caching_args,
@@ -520,6 +508,8 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
                 evaluation_tracker.save_results_samples(
                     task_name=task_name, samples=samples[task_name]
                 )
+
+        # if args.moe_statistics_experts: save to disk
 
         if (
             evaluation_tracker.push_results_to_hub

@@ -4,11 +4,12 @@ import logging
 import random
 import time
 import itertools
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import TYPE_CHECKING, List, Optional, Union
 
 import numpy as np
-import torch
+import torch, torch_npu
+import os
 
 import lm_eval.api.metrics
 import lm_eval.api.registry
@@ -51,28 +52,11 @@ eval_logger = logging.getLogger(__name__)
 eval_logger.setLevel(logging.INFO)
 
 # Import MoE statistics functionality
-try:
-    import sys
-    import os
-    # Add the FPM src directory to path to import moe_monkey_patch
-    fpm_src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "FPM", "src")
-    if os.path.exists(fpm_src_path):
-        sys.path.insert(0, fpm_src_path)
-        from model.moe_monkey_patch import (
-            MoeExpertsStatistics,
-            register_moe_hooks,
-            unregister_moe_hooks,
-            set_moe_statistics_context,
-            clear_moe_statistics_context,
-        )
-        MOE_STATISTICS_AVAILABLE = True
-        eval_logger.info("MoE statistics functionality imported successfully")
-    else:
-        MOE_STATISTICS_AVAILABLE = False
-        eval_logger.warning("MoE statistics functionality not available: FPM src path not found")
-except ImportError as e:
-    MOE_STATISTICS_AVAILABLE = False
-    eval_logger.warning(f"MoE statistics functionality not available: {e}")
+from lm_eval.moe_utils import (
+    register_aggregate_moe_hooks,
+    save_aggregate_moe_stats,
+    unregister_moe_hooks,
+)
 
 @positional_deprecated
 def simple_evaluate(
@@ -106,6 +90,7 @@ def simple_evaluate(
     fewshot_random_seed: int = 1234,
     confirm_run_unsafe_code: bool = False,
     metadata: Optional[dict] = None,
+    output_path: Optional[str] = None,
     # path_to_model_monkey_patch: Optional[str] = None,
     # path_to_config_monkey_patch: Optional[str] = None,
     statistics_moe_experts: bool = False,
@@ -172,8 +157,9 @@ def simple_evaluate(
         Random seed for fewshot sampler random generator. If set to None, the seed of generator will be set to None.
     :param metadata: dict
         Additional metadata to be added to the task manager. Will get passed to the download function of the task.
-
-    return
+    :param output_path: str, optional
+        Path to save MoE statistics file
+    :return
         Dictionary of results
     """
     if verbosity is not None:
@@ -280,21 +266,9 @@ def simple_evaluate(
         )
 
     # Initialize MoE statistics if requested
-    moe_statistics_collector = None
-    moe_hooks = []
-    if statistics_moe_experts and MOE_STATISTICS_AVAILABLE:
-        eval_logger.info("Initializing MoE expert statistics collection")
-        moe_statistics_collector = MoeExpertsStatistics()
-        
-        # Register hooks on the model
-        if hasattr(lm, 'model') and lm.model is not None:
-            moe_hooks = register_moe_hooks(lm.model)
-            eval_logger.info(f"Registered {len(moe_hooks)} MoE hooks for statistics collection")
-        else:
-            eval_logger.warning("Could not register MoE hooks: model not accessible")
-    elif statistics_moe_experts and not MOE_STATISTICS_AVAILABLE:
-        eval_logger.error("MoE statistics requested but functionality not available")
-        raise ValueError("MoE statistics functionality not available. Please ensure FPM is properly installed.")
+    per_task_moe_stats = {}
+    if statistics_moe_experts:
+        eval_logger.info("Initializing Aggregate MoE expert statistics collection.")
 
     if task_manager is None:
         metadata = (
@@ -395,7 +369,8 @@ def simple_evaluate(
         verbosity=verbosity,
         confirm_run_unsafe_code=confirm_run_unsafe_code,
         use_experts=use_experts,
-        moe_statistics_collector=moe_statistics_collector
+        statistics_moe_experts=statistics_moe_experts,
+        per_task_moe_stats=per_task_moe_stats,
     )
     if verbosity is not None:
         setup_logging(verbosity=verbosity)
@@ -440,28 +415,32 @@ def simple_evaluate(
         add_env_info(results)  # additional environment info to results
         add_tokenizer_info(results, lm)  # additional info about tokenizer
         
-        # Save MoE statistics if collected
-        if moe_statistics_collector is not None and MOE_STATISTICS_AVAILABLE:
-            eval_logger.info("Saving MoE expert statistics")
-            # Use current working directory for output
-            moe_stats_path = os.path.abspath("moe_expert_statistics.json")
-            moe_statistics_collector.save(moe_stats_path)
-            eval_logger.info(f"MoE expert statistics saved to: {moe_stats_path}")
-            
-            # Add statistics info to results
-            results["config"]["moe_statistics_path"] = moe_stats_path
-            results["config"]["moe_statistics_enabled"] = True
-        
-        # Clean up MoE hooks
-        if moe_hooks and MOE_STATISTICS_AVAILABLE:
-            unregister_moe_hooks(moe_hooks)
-            eval_logger.info("Unregistered MoE hooks")
-        
+        # Rank 0 saves the final aggregated results
+        if statistics_moe_experts and per_task_moe_stats:
+            if output_path:
+                output_dir = os.path.dirname(output_path)
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+                moe_output_path = os.path.join(
+                    output_dir, "moe_aggregate_stats.jsonl"
+                )
+            else:
+                moe_output_path = "moe_aggregate_stats.jsonl"
+
+            eval_logger.info(f"Saving aggregate MoE statistics to {moe_output_path}")
+            with open(moe_output_path, "w") as f:
+                for task_name, moe_stats in per_task_moe_stats.items():
+                    # Convert tensors to lists for JSON serialization
+                    for layer, counts in moe_stats.items():
+                        if isinstance(counts, torch.Tensor):
+                            moe_stats[layer] = counts.tolist()
+
+                    record = {"task": task_name, "stats": moe_stats}
+                    f.write(json.dumps(record) + "\\n")
+
         return results
-    else:
-        # Clean up MoE hooks for non-rank-0 processes
-        if moe_hooks and MOE_STATISTICS_AVAILABLE:
-            unregister_moe_hooks(moe_hooks)
+    
+    else: # rank != 0
         return None
 
 
@@ -481,7 +460,8 @@ def evaluate(
     verbosity: str = "INFO",
     confirm_run_unsafe_code: bool = False,
     use_experts: str = "",
-    moe_statistics_collector=None
+    statistics_moe_experts: bool = False,
+    per_task_moe_stats: dict = None,
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -588,7 +568,7 @@ def evaluate(
             tokenizer_name=getattr(lm, "tokenizer_name", "")
             if apply_chat_template
             else "",
-            use_experts=use_experts
+            use_experts=use_experts,
         )
         eval_logger.debug(
             f"Task: {task_output.task_name}; number of requests on this rank: {len(task.instances)}"
@@ -596,105 +576,85 @@ def evaluate(
         if write_out:
             print_writeout(task)
         # aggregate Instances by LM method requested to get output.
+        # all Instance requests for a given task will be dispatched and evaluated here
+        if statistics_moe_experts:
+            task_moe_stats = {}
+            moe_hooks = register_aggregate_moe_hooks(lm.model, task_moe_stats)
+            eval_logger.info(
+                f"Registered {len(moe_hooks)} MoE hooks for aggregate statistics for task {task_output.task_name}."
+            )
+
+        requests = defaultdict(list)
         for instance in task.instances:
             reqtype = instance.request_type
             requests[reqtype].append(instance)
 
-        # eval_logger.debug(f"[RANK {lm.rank}/{lm.world_size}] len(requests) is {len(requests)}")
-        # eval_logger.debug(f"[RANK {lm.rank}/{lm.world_size}] len(requests[generate_until]) is {len(requests['generate_until'])}")
-
         if lm.world_size > 1:
-            instances_rnk = torch.tensor(len(task._instances), device=lm.device)
-            gathered_item = (
-                lm.accelerator.gather(instances_rnk).cpu().detach().numpy().tolist()
+            instances_per_rank = Counter(
+                (
+                    "loglikelihood"
+                    if inst.request_type == "multiple_choice"
+                    else inst.request_type
+                )
+                for inst in task.instances
             )
-            # "multiple_choice" task types dispatch (several) "loglikelihood" request types
-            reqtype = (
-                "loglikelihood"
-                if task.OUTPUT_TYPE == "multiple_choice"
-                else task.OUTPUT_TYPE
-            )
-            # compute number of pseudo-batches to pad with (FSDP/DDP require even batches among ranks)
-            numpad = max(gathered_item) - gathered_item[lm.rank]
-            # todo: may not account for padding in cases like SquadV2 which has multiple req types
-            padding_requests[reqtype] += numpad
-    
+            for reqtype, num in instances_per_rank.items():
+                if reqtype not in padding_requests:
+                    padding_requests[reqtype] = 0
 
-    ### Run LM on inputs, get all outputs ###
-    # execute each type of request
-    for reqtype, reqs in requests.items():
-        # create `K` copies of each request `req` based off `K = req.repeats`
-        cloned_reqs = []
-        for req in reqs:
-            cloned_reqs.extend([req] * req.repeats)
+                gathered_item = lm.accelerator.gather(
+                    torch.tensor(num, device=lm.device)
+                )
+                padding_requests[reqtype] += (
+                    max(gathered_item).item() - gathered_item[lm.rank].item()
+                )
 
-        if (lm.world_size > 1) and (padding_requests[reqtype] > 0):
-            for _ in range(padding_requests[reqtype]):
+        ### Run LM on inputs, get all outputs ###
+        # execute each type of request
+        for reqtype, reqs in requests.items():
+            # create `K` copies of each request `req` based off `K = req.repeats`
+            cloned_reqs = []
+            for req in reqs:
                 cloned_reqs.extend([req] * req.repeats)
 
-        # run requests through model
-        # TODO: here is where the request objects get really messy      # noqa: E265
-        # Group requests by doc_id for MoE statistics context
-        if MOE_STATISTICS_AVAILABLE and moe_statistics_collector is not None:
-            doc_groups = defaultdict(list)
-            for req in cloned_reqs:
-                doc_groups[req.doc_id].append(req)
+            if (lm.world_size > 1) and (padding_requests[reqtype] > 0):
+                cloned_reqs.extend(
+                    [reqs[0]] * padding_requests[reqtype] * reqs[0].repeats
+                )
 
-            all_resps = []
-            for doc_id, doc_reqs in doc_groups.items():
-                # Set up MoE statistics context for this document
-                # Assuming token_offset needs to be managed if inputs are chunked;
-                # for now, assuming each doc starts at offset 0.
-                # This might need adjustment based on how data is processed upstream.
-                set_moe_statistics_context(moe_statistics_collector, doc_id, token_offset=0)
-                
-                with torch.profiler.profile(
-                    activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-                    record_shapes=True,
-                    profile_memory=True,
-                    with_stack=True,
-                    on_trace_ready=torch.profiler.tensorboard_trace_handler('./log_profile/moe_eval')
-                ) as prof:
-                    with torch.profiler.record_function("model_inference_batch"):
-                        resps_for_doc = getattr(lm, reqtype)(doc_reqs)
-                
-                eval_logger.info(f"Profiler data for doc_id {doc_id} saved to ./log_profile/moe_eval")
-                all_resps.extend(resps_for_doc)
-                clear_moe_statistics_context()
-            
-            # Reorder responses to match original cloned_reqs order
-            # Create a mapping from request to response
-            req_to_resp = {}
-            resp_idx = 0
-            for doc_id, doc_reqs in doc_groups.items():
-                for req in doc_reqs:
-                    req_to_resp[id(req)] = all_resps[resp_idx]
-                    resp_idx += 1
-            
-            # Build final response list in original order
-            resps = [req_to_resp[id(req)] for req in cloned_reqs]
-
-        else: # Original path if MoE statistics are not being collected
-            # with torch.profiler.profile(
-            #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            #     record_shapes=True,
-            #     profile_memory=True,
-            #     with_stack=True,
-            #     on_trace_ready=torch.profiler.tensorboard_trace_handler('./log_profile/moe_eval')
-            # ) as prof:
-            #     with torch.profiler.record_function("model_inference_batch"):
-            #         resps = getattr(lm, reqtype)(cloned_reqs)
-            # eval_logger.info("Profiler data saved to ./log_profile/moe_eval (non-MoE stats path)")
+            # run requests through model
             resps = getattr(lm, reqtype)(cloned_reqs)
 
-        # put responses from model into a list of length K for each request.
-        for x, req in zip(resps, cloned_reqs):
-            req.resps.append(x)
+            # put responses from model into a list of length K for each request.
+            for x, req in zip(resps, cloned_reqs):
+                req.resps.append(x)
 
         if lm.world_size > 1:
-            eval_logger.info(f"[RANK {lm.rank}/{lm.world_size}] Syncing LM results bewteen {lm.world_size} ranks, accelerator = {lm.accelerator} waiting ...")
             lm.accelerator.wait_for_everyone()
 
+        if statistics_moe_experts:
+            # unregister hooks and process stats
+            unregister_moe_hooks(moe_hooks)
+            eval_logger.info(
+                f"Unregistered MoE hooks for task {task_output.task_name}."
+            )
+
+            if lm.world_size > 1:
+                # aggregate stats from all ranks
+                eval_logger.info(
+                    f"Aggregating MoE stats from {lm.world_size} ranks for task {task_output.task_name}."
+                )
+                all_layers = sorted(task_moe_stats.keys())
+                for layer_id in all_layers:
+                    counts_gpu = task_moe_stats[layer_id].to(lm.device)
+                    torch.distributed.all_reduce(
+                        counts_gpu, op=torch.distributed.ReduceOp.SUM
+                    )
+                    task_moe_stats[layer_id] = counts_gpu.cpu()
+
+            if lm.rank == 0:
+                per_task_moe_stats[task_output.task_name] = task_moe_stats
+    
     RANK = lm.rank
     WORLD_SIZE = lm.world_size
     eval_logger.info(f"[RANK {lm.rank}/{lm.world_size}] Post processing outputs")

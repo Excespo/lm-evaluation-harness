@@ -40,6 +40,7 @@ from lm_eval.models.utils import (
     load_monkey_patch_module
 )
 
+import deepspeed
 
 eval_logger = logging.getLogger(__name__)
 transformers.logging.set_verbosity_error()
@@ -102,9 +103,6 @@ class HFLM(TemplateLM):
 
         # Model Monkey Patch
         if path_to_modeling_monkey_patch is not None and path_to_config_monkey_patch is not None:
-            import deepspeed
-            # if not hasattr(deepspeed.utils, "groups") or not deepspeed.utils.groups.is_initialized():
-                # deepspeed.utils.groups.initialize(ep_size=1)
             deepspeed.init_distributed()
             apply_modeling = getattr(load_monkey_patch_module(path_to_modeling_monkey_patch), "apply")
             apply_config = getattr(load_monkey_patch_module(path_to_config_monkey_patch), "apply")
@@ -929,22 +927,6 @@ class HFLM(TemplateLM):
             self.tokenizer, stop, context.shape[1], context.shape[0]
         )
         
-        # # Process experts_mask if provided
-        # experts_mask = generation_kwargs.pop("experts_mask", None)
-        # if experts_mask is not None:
-        #     eval_logger.info(f"Making experts mask for {experts_mask}")
-        #     self.model._create_experts_mask_from_string(experts_mask)
-            
-        #     # Ensure experts_mask is on the correct device
-        #     if hasattr(self.model, "experts_mask") and self.model.experts_mask is not None:
-        #         if self.model.experts_mask.device != context.device:
-        #             eval_logger.info(f"Moving experts_mask from {self.model.experts_mask.device} to {context.device}")
-        #             self.model.experts_mask = self.model.experts_mask.to(context.device)
-                
-        #         # Add the tensor experts_mask back to generation_kwargs
-        #         generation_kwargs["experts_mask"] = self.model.experts_mask
-        #         eval_logger.info(f"Added experts_mask to generation_kwargs: {generation_kwargs['experts_mask']}")
-
         # Generate the output
         return self.model.generate(
             input_ids=context,
@@ -1592,3 +1574,17 @@ class HFLM(TemplateLM):
         if self.delta:
             model_info["delta_sha"] = get_model_sha(self.delta, self.revision)
         return model_info
+
+    def _create_experts_mask(self):
+        if self.use_experts is None:
+            return None
+        
+        n_experts = self.model.config.num_local_experts
+        mask = torch.zeros(1, n_experts, dtype=torch.float)
+        
+        expert_indices = [int(e.strip()) for e in self.use_experts.split(",")]
+        for i in expert_indices:
+            if 0 <= i < n_experts:
+                mask[0, i] = 1.0 #TODO, 0 or 1?
+        
+        return mask.to(self.device)
