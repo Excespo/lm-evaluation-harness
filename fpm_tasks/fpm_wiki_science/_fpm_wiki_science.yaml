@@ -1,0 +1,4 @@
+group: fpm_wiki_science
+task:
+  - nq_open_science_main
+  - triviaqa_science_main

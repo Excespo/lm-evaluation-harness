@@ -1,0 +1,7 @@
+task: fpm_humaneval
+include: ../../lm_eval/tasks/humaneval/humaneval.yaml
+generation_kwargs: 
+  do_sample: true
+  temperature: 0.1
+dataset_kwargs: 
+  trust_remote_code: true

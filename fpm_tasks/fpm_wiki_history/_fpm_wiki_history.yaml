@@ -1,3 +1,4 @@
 group: fpm_wiki_history
 task:
-  - nq_open_history 
+  - nq_open_history_main
+  - triviaqa_history_main

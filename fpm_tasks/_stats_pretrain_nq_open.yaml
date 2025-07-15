@@ -1,0 +1,6 @@
+group: stats_pretrain_nq_open
+task:
+  - stats_pretrain_nq_open_geography
+  - stats_pretrain_nq_open_history
+  - stats_pretrain_nq_open_literature
+  - stats_pretrain_nq_open_politics

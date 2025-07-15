@@ -1,0 +1,18 @@
+tag: lexglue
+task: ledgar
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/lex_glue/ledgar
+output_type: multiple_choice
+training_split: train
+validation_split: validation
+test_split: test
+doc_to_text: "{{text}}\nQuestion: What type of legal clause is this?\nAnswer:"
+doc_to_choice: !function ledgar_util.doc_to_choice
+doc_to_target: "{{label}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

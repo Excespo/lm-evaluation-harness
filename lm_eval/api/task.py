@@ -1487,7 +1487,7 @@ class ConfigurableTask(Task):
             else:
                 arguments = arguments + (multimodal_arg,)
 
-        if use_experts:
+        if use_experts: # TODO: 目前expert mask的逻辑是在task和每一个doc串联，其实可以加入model_args来处理的。另外，ConfigurableTask以外的任务类型应该也需要和这里保持一致的
             use_experts = self._create_to_experts_mask(use_experts)
             if isinstance(arguments, list):
                 arguments = [arg + (use_experts,) for arg in arguments]

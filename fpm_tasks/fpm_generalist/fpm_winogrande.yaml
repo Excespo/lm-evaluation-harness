@@ -1,0 +1,3 @@
+task: fpm_winogrande
+include: ../../lm_eval/tasks/winogrande/default.yaml
+num_fewshot: 5

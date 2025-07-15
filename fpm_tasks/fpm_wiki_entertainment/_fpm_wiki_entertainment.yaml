@@ -1,0 +1,4 @@
+group: fpm_wiki_entertainment
+task:
+  - nq_open_entertainment_main
+  - triviaqa_entertainment_main

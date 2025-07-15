@@ -1,0 +1,8 @@
+group: fpm_wiki_main_topics
+task:
+  - fpm_wiki_culture
+  - fpm_wiki_entertainment
+  - fpm_wiki_geography
+  - fpm_wiki_history
+  - fpm_wiki_humanities
+  - fpm_wiki_science 

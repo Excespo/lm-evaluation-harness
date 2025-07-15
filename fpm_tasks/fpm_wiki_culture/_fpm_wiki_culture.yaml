@@ -1,0 +1,4 @@
+group: fpm_wiki_culture
+task:
+  - nq_open_culture_main
+  - triviaqa_culture_main

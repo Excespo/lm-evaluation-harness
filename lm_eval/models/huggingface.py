@@ -313,7 +313,7 @@ class HFLM(TemplateLM):
                 f"Loglikelihood prefix token id used in evaluation: {self.prefix_token_id}"
             )
         
-        # Cache for experts_mask to avoid recomputation
+        # Cache for experts_mask to avoid recomputation # TODO: 关于这个设计，其实直接把expert mask设置给model本身就可以了
         self._experts_mask_cache = {}
 
 
@@ -755,8 +755,9 @@ class HFLM(TemplateLM):
         return None
 
     def _get_function_to_expert_indices(self):
-        
-        return getattr(self.model.config, "function_to_expert_indices", None)
+        function_to_expert_indices = getattr(self.model.config, "function_to_expert_indices", None)
+        # print(f"Got {function_to_expert_indices=}")
+        return function_to_expert_indices
 
     def _detect_batch_size(self, requests=None, pos: int = 0):
         if requests:
@@ -1234,6 +1235,7 @@ class HFLM(TemplateLM):
             experts_mask_list = [self._create_experts_mask_from_parsed_str(
                 use_experts, self._get_function_to_expert_indices()
             ) for use_experts in use_experts_list]
+            # eval_logger.info(f"Using {experts_mask_list=}")
             if not any(m is None for m in experts_mask_list):
                 batch_experts_mask = torch.cat(experts_mask_list, dim=0).to(self.device)
                 call_kwargs["experts_mask"] = batch_experts_mask
@@ -1415,7 +1417,7 @@ class HFLM(TemplateLM):
                 # Format: (context, gen_kwargs, use_experts)
                 contexts, all_gen_kwargs, use_experts = zip(*chunk)
             elif len(chunk[0]) == 2:
-                # Format: (context, gen_kwargs) - no use_experts
+                # Format: (context, gen_kwargs) - no use_experts 
                 contexts, all_gen_kwargs = zip(*chunk)
                 use_experts = [{}] * len(contexts)  # Empty dict for each context
             else:
@@ -1429,6 +1431,7 @@ class HFLM(TemplateLM):
             experts_mask_list = [self._create_experts_mask_from_parsed_str(
                 use, self._get_function_to_expert_indices()
             ) for use in use_experts]
+            # eval_logger.info(f"Using {experts_mask_list=}")
             if all(m is not None for m in experts_mask_list):
                 # print(f"{experts_mask_list = }")
                 batch_experts_mask = torch.cat(experts_mask_list, dim=0).to(self.device)

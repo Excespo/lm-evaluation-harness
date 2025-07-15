@@ -1,0 +1,4 @@
+group: fpm_wiki_humanities
+task:
+  - nq_open_humanities_main
+  - triviaqa_humanities_main

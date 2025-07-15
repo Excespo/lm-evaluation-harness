@@ -1,0 +1,14 @@
+task:
+  fpm_gsm8k
+include:
+  ../../lm_eval/tasks/gsm8k/gsm8k.yaml
+num_fewshot:
+  8
+generation_kwargs:
+  until:
+    - "Question:"
+    - "</s>"
+    - "<|im_end|>"
+  do_sample: false
+  temperature: 0.0
+  max_gen_toks: 512

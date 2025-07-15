@@ -8,6 +8,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+
 from datasets import load_dataset
 from datasets.utils.metadata import MetadataConfigs
 from huggingface_hub import (
@@ -522,3 +527,287 @@ class EvaluationTracker:
             pretty_name=card_data.pretty_name,
         )
         card.push_to_hub(repo_id, repo_type="dataset")
+
+    def save_moe_statistics(
+        self,
+        per_task_moe_stats: dict,
+        mapping_file: str = None,
+    ) -> None:
+        """
+        Saves the MoE statistics to the output path and pushes them to the Hugging Face hub if requested.
+        Also generates heatmap visualizations for each task.
+
+        Args:
+            per_task_moe_stats (dict): The MoE statistics to save, organized by task name.
+            mapping_file (str): Optional path to expert mapping file for better labels.
+        """
+        if not self.output_path:
+            eval_logger.info("Output path not provided, skipping saving MoE statistics")
+            return
+
+        eval_logger.info("Saving MoE statistics")
+
+        path = Path(self.output_path if self.output_path else Path.cwd())
+        path = path.joinpath(self.general_config_tracker.model_name_sanitized)
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Use the same date_id as other results for consistency
+        if not hasattr(self, 'date_id'):
+            self.date_id = datetime.now().isoformat().replace(":", "-")
+            
+        file_moe_stats = path.joinpath(f"moe_stats_{self.date_id}.jsonl")
+
+        with open(file_moe_stats, "w", encoding="utf-8") as f:
+            for task_name, moe_stats in per_task_moe_stats.items():
+                # Convert tensors to lists for JSON serialization
+                serializable_stats = {}
+                for layer, counts in moe_stats.items():
+                    if hasattr(counts, 'tolist'):  # Check if it's a tensor
+                        serializable_stats[layer] = counts.tolist()
+                    else:
+                        serializable_stats[layer] = counts
+
+                record = {
+                    "task": task_name, 
+                    "stats": serializable_stats,
+                    "timestamp": self.date_id
+                }
+                f.write(json.dumps(record, default=handle_non_serializable, ensure_ascii=False) + "\n")
+                
+                # Generate heatmap for this task
+                eval_logger.info(f"Generating heatmap for task: {task_name}")
+                self._create_task_heatmap(task_name, serializable_stats, str(path), mapping_file)
+
+        eval_logger.info(f"MoE statistics saved to {file_moe_stats}")
+
+        if self.api and self.push_results_to_hub:
+            repo_id = (
+                self.details_repo
+                if self.public_repo
+                else self.details_repo_private
+            )
+            self.api.create_repo(
+                repo_id=repo_id,
+                repo_type="dataset",
+                private=not self.public_repo,
+                exist_ok=True,
+            )
+            self.api.upload_file(
+                repo_id=repo_id,
+                path_or_fileobj=str(file_moe_stats),
+                path_in_repo=os.path.join(
+                    self.general_config_tracker.model_name_sanitized,
+                    f"moe_stats_{self.date_id}.jsonl",
+                ),
+                repo_type="dataset",
+                commit_message=f"Adding MoE statistics for {self.general_config_tracker.model_name}",
+            )
+            eval_logger.info(
+                f"Successfully pushed MoE statistics to the Hugging Face Hub. "
+                f"You can find them at: {repo_id}"
+            )
+
+    def _create_task_heatmap(self, task_name: str, moe_stats: dict, output_dir: str, mapping_file: str = None) -> None:
+        """
+        Create heat map for a single task showing all layers and experts
+        
+        Args:
+            task_name (str): name of the task
+            moe_stats (dict): MoE statistics for the task (layer_id: stats_list)
+            output_dir (str): output directory for saving plots
+            mapping_file (str): path to function_to_expert_indices mapping file
+        """
+        if not moe_stats:
+            eval_logger.warning(f"No MoE statistics found for task: {task_name}")
+            return
+        
+        # Read mapping file if provided
+        mapping = {}
+        if mapping_file and os.path.exists(mapping_file):
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                mapping = json.load(f)
+        
+        # Convert MoE stats to a 2D matrix: layers x experts
+        layer_names = list(moe_stats.keys())
+        layer_names.sort()  # Sort layer names for consistent ordering
+        
+        if not layer_names:
+            eval_logger.warning(f"No data found for task {task_name}")
+            return
+            
+        # Get the number of experts from the first layer
+        first_layer_data = moe_stats[layer_names[0]]
+        n_experts = len(first_layer_data)
+        n_layers = len(layer_names)
+        
+        # Create matrix: rows=layers, cols=experts
+        stats_matrix = np.zeros((n_layers, n_experts))
+        
+        for i, layer_name in enumerate(layer_names):
+            layer_data = moe_stats[layer_name]
+            if len(layer_data) != n_experts:
+                eval_logger.warning(f"Layer {layer_name} has {len(layer_data)} experts, expected {n_experts}")
+                # Pad or truncate to match expected size
+                if len(layer_data) < n_experts:
+                    layer_data.extend([0] * (n_experts - len(layer_data)))
+                else:
+                    layer_data = layer_data[:n_experts]
+            stats_matrix[i, :] = layer_data
+        
+        # Convert to percentages (each row sums to 100%)
+        percentage_matrix = np.zeros_like(stats_matrix)
+        for i in range(n_layers):
+            row_sum = np.sum(stats_matrix[i, :])
+            if row_sum > 0:
+                percentage_matrix[i, :] = (stats_matrix[i, :] / row_sum) * 100
+            else:
+                percentage_matrix[i, :] = 0
+
+        # Calculate average statistics
+        avg_usage = np.mean(percentage_matrix, axis=0)
+        
+        expert_labels = self._create_expert_labels_from_mapping(mapping, n_experts)
+        
+        # Create figure with custom layout using gridspec
+        fig = plt.figure(figsize=(max(12, n_experts * 0.8), max(10, n_layers + 4)))
+        
+        # Create gridspec with height ratios: main heatmap gets more space
+        gs = fig.add_gridspec(3, 1, height_ratios=[n_layers, 1, 0.3], hspace=0.1)
+        
+        # 上图：详细的每层专家分布
+        ax1 = fig.add_subplot(gs[0, 0])
+        im1 = ax1.imshow(percentage_matrix, cmap='viridis', aspect='auto', 
+                        vmin=0, vmax=percentage_matrix.max())
+        
+        # 设置上图的标签和标题
+        ax1.set_xticks(range(n_experts))
+        ax1.set_xticklabels(expert_labels, rotation=45, ha='right')
+        ax1.set_yticks(range(n_layers))
+        ax1.set_yticklabels(layer_names)
+        ax1.set_ylabel('Layers', fontsize=12)
+        ax1.set_title(f'MoE Expert Usage Statistics - Task: {task_name}', fontsize=14, pad=20)
+        
+        # 在上图中添加数值标注
+        for i in range(n_layers):
+            for j in range(n_experts):
+                text = ax1.text(j, i, f'{percentage_matrix[i, j]:.1f}',
+                              ha="center", va="center", color="white" if percentage_matrix[i, j] > percentage_matrix.max()/2 else "black",
+                              fontsize=8)
+        
+        # 下图：平均统计（单行）
+        ax2 = fig.add_subplot(gs[1, 0])
+        avg_matrix = avg_usage.reshape(1, -1)
+        im2 = ax2.imshow(avg_matrix, cmap='viridis', aspect='auto', 
+                        vmin=0, vmax=percentage_matrix.max())
+        
+        # 设置下图的标签 - 移除不必要的标签
+        ax2.set_xticks(range(n_experts))
+        ax2.set_xticklabels(expert_labels, rotation=45, ha='right')
+        ax2.set_yticks([0])
+        ax2.set_yticklabels(['Average'])
+        
+        # 在下图中添加数值标注
+        for j in range(n_experts):
+            text = ax2.text(j, 0, f'{avg_usage[j]:.1f}',
+                          ha="center", va="center", color="white" if avg_usage[j] > percentage_matrix.max()/2 else "black",
+                          fontsize=8)
+        
+        # 共享的颜色条
+        cbar_ax = fig.add_subplot(gs[2, 0])
+        cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
+        cbar.set_label('Usage Percentage (%)', fontsize=12)
+        
+        # 确保上下图的x轴对齐
+        ax1.set_xlim(-0.5, n_experts - 0.5)
+        ax2.set_xlim(-0.5, n_experts - 0.5)
+        
+        # 移除上图的x轴标签（避免重复）
+        ax1.set_xticklabels([])
+        ax1.tick_params(axis='x', which='both', length=0)
+        
+        # 调整布局
+        plt.tight_layout()
+        
+        # Save plot
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"moe_stats_{task_name}_{timestamp}.png"
+        filepath = os.path.join(output_dir, filename)
+        
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close()
+        eval_logger.info(f"Saved MoE statistics heatmap for task '{task_name}' to: {filepath}")
+        
+        # Also save average statistics as a separate CSV file
+        self._save_average_statistics(expert_labels, avg_usage, task_name, output_dir)
+
+    def _create_expert_labels_from_mapping(self, mapping: dict, n_experts: int) -> list[str]:
+        """
+        Create expert labels from function_to_expert_indices mapping
+        
+        Args:
+            mapping (dict): The mapping containing function_to_expert_indices
+            n_experts (int): Total number of experts
+            
+        Returns:
+            list[str]: List of expert labels
+        """
+        # Default labels
+        expert_labels = [f"Expert_{i}" for i in range(n_experts)]
+        
+        # Check if mapping contains function_to_expert_indices
+        if mapping and "function_to_expert_indices" in mapping:
+            # mapping contains function_to_expert_indices key
+            indices_mapping = mapping["function_to_expert_indices"]
+            expert_to_function = {}
+            for func_name, expert_indices in indices_mapping.items():
+                for i, expert_idx in enumerate(expert_indices):
+                    if expert_idx < n_experts:
+                        expert_to_function[expert_idx] = f"{func_name}_{i}"
+            
+            # Update labels based on the mapping
+            for expert_idx, label in expert_to_function.items():
+                if expert_idx < len(expert_labels):
+                    expert_labels[expert_idx] = label
+        
+        # If mapping is the function_to_expert_indices directly (not nested)
+        elif mapping and all(isinstance(v, list) for v in mapping.values()):
+            # mapping is directly function_to_expert_indices
+            expert_to_function = {}
+            for func_name, expert_indices in mapping.items():
+                for i, expert_idx in enumerate(expert_indices):
+                    if expert_idx < n_experts:
+                        expert_to_function[expert_idx] = f"{func_name}_{i}"
+            
+            # Update labels based on the mapping
+            for expert_idx, label in expert_to_function.items():
+                if expert_idx < len(expert_labels):
+                    expert_labels[expert_idx] = label
+        
+        return expert_labels
+
+    def _save_average_statistics(self, expert_labels: list[str], avg_usage: np.ndarray, task_name: str, output_dir: str) -> None:
+        """
+        Save average expert usage statistics to a CSV file
+        
+        Args:
+            expert_labels (list[str]): List of expert names
+            avg_usage (np.ndarray): Average usage percentages
+            task_name (str): Name of the task
+            output_dir (str): Output directory
+        """
+        # Create DataFrame
+        df = pd.DataFrame({
+            'Expert': expert_labels,
+            'Average_Usage_Percentage': avg_usage
+        })
+        
+        # Sort by usage percentage (descending)
+        df = df.sort_values('Average_Usage_Percentage', ascending=False)
+        
+        # Save to CSV
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"moe_avg_stats_{task_name}_{timestamp}.csv"
+        csv_filepath = os.path.join(output_dir, csv_filename)
+        
+        df.to_csv(csv_filepath, index=False, float_format='%.2f')
+        eval_logger.info(f"Saved average MoE statistics to: {csv_filepath}")

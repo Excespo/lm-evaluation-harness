@@ -1,0 +1,4 @@
+task:
+  fpm_math_500
+include: 
+  ../../lm_eval/tasks/math_500/math_500.yaml

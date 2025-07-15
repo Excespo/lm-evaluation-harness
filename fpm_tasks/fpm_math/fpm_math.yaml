@@ -1,0 +1,11 @@
+group: fpm_math
+task:
+  # - fpm_hendrycks_math
+  # - fpm_gsm8k
+  # - fpm_cmath
+  - fpm_gaokao_mathqa
+  - fpm_gaokao_mathcloze
+aggregate_metric_list:
+  - metric: acc
+    aggregation: mean
+    weight_by_size: True

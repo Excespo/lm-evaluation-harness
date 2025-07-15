@@ -1,0 +1,28 @@
+tag: fpm_finance
+task: ner
+dataset_path: /aistor/aispeech/hpc_stor01/home/mada00sx/data/yijie.luo/sft/raw/finance/ner/data
+output_type: generate_until
+training_split: train
+test_split: test
+doc_to_text: "Question: {{instruction}} {{input}}\nAnswer:"
+doc_to_target: "{{output}}"
+process_results: !function ner_util.process_results
+metric_list:
+  - metric: entity_f1
+    aggregation: mean
+    higher_is_better: true
+  - metric: em
+    aggregation: mean
+    higher_is_better: true
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+
+generation_kwargs:
+  until:
+    - "Question:"
+    - "</s>"
+    - "<|im_end|>"
+
+metadata:
+  version: 3.0

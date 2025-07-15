@@ -1,3 +1,4 @@
 group: fpm_wiki_geography
 task:
-  - nq_open_geography 
+  - nq_open_geography_main
+  - triviaqa_geography_main

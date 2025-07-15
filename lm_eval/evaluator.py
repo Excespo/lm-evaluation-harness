@@ -417,26 +417,61 @@ def simple_evaluate(
         
         # Rank 0 saves the final aggregated results
         if statistics_moe_experts and per_task_moe_stats:
-            if output_path:
-                output_dir = os.path.dirname(output_path)
-                if output_dir:
-                    os.makedirs(output_dir, exist_ok=True)
-                moe_output_path = os.path.join(
-                    output_dir, "moe_aggregate_stats.jsonl"
+            eval_logger.info("Saving MoE statistics with complete functionality")
+            
+            # Use evaluation_tracker for complete MoE statistics functionality
+            if evaluation_tracker is not None:
+                # Try to get function_to_expert_indices from model config
+                mapping_file = None
+                if hasattr(lm, 'model') and hasattr(lm.model, 'config'):
+                    if hasattr(lm.model.config, 'function_to_expert_indices'):
+                        function_to_expert_indices = lm.model.config.function_to_expert_indices
+                        eval_logger.debug(f"[FPM Debug] Found function_to_expert_indices: {function_to_expert_indices}")
+                        
+                        # Create a temporary mapping file for the visualization
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                            json.dump({"function_to_expert_indices": function_to_expert_indices}, f)
+                            mapping_file = f.name
+                            eval_logger.debug(f"[FPM Debug] Created temporary mapping file: {mapping_file}")
+                    else:
+                        eval_logger.debug("[FPM Debug] No function_to_expert_indices found in model config")
+                
+                # Call the complete MoE statistics functionality
+                evaluation_tracker.save_moe_statistics(
+                    per_task_moe_stats=per_task_moe_stats,
+                    mapping_file=mapping_file
                 )
+                
+                # Clean up temporary file
+                if mapping_file:
+                    import os
+                    os.unlink(mapping_file)
+                    eval_logger.debug(f"[FPM Debug] Cleaned up temporary mapping file: {mapping_file}")
             else:
-                moe_output_path = "moe_aggregate_stats.jsonl"
+                # Fallback to basic saving if no evaluation_tracker
+                eval_logger.warning("No evaluation_tracker provided, falling back to basic MoE statistics saving")
+                
+                if output_path:
+                    output_dir = os.path.dirname(output_path)
+                    if output_dir:
+                        os.makedirs(output_dir, exist_ok=True)
+                    moe_output_path = os.path.join(
+                        output_dir, "moe_aggregate_stats.jsonl"
+                    )
+                else:
+                    moe_output_path = "moe_aggregate_stats.jsonl"
 
-            eval_logger.info(f"Saving aggregate MoE statistics to {moe_output_path}")
-            with open(moe_output_path, "w") as f:
-                for task_name, moe_stats in per_task_moe_stats.items():
-                    # Convert tensors to lists for JSON serialization
-                    for layer, counts in moe_stats.items():
-                        if isinstance(counts, torch.Tensor):
-                            moe_stats[layer] = counts.tolist()
+                eval_logger.info(f"Saving basic MoE statistics to {moe_output_path}")
+                with open(moe_output_path, "w") as f:
+                    for task_name, moe_stats in per_task_moe_stats.items():
+                        # Convert tensors to lists for JSON serialization
+                        for layer, counts in moe_stats.items():
+                            if isinstance(counts, torch.Tensor):
+                                moe_stats[layer] = counts.tolist()
 
-                    record = {"task": task_name, "stats": moe_stats}
-                    f.write(json.dumps(record) + "\\n")
+                        record = {"task": task_name, "stats": moe_stats}
+                        f.write(json.dumps(record) + "\n")
 
         return results
     

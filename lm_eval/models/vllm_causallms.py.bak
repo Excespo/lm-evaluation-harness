@@ -21,7 +21,6 @@ from lm_eval.utils import (
     get_rolling_token_windows,
     make_disjoint_window,
 )
-import os
 
 
 try:
@@ -68,7 +67,6 @@ class VLLM(TemplateLM):
         lora_local_path: str = None,
         path_to_modeling_monkey_patch: Optional[str] = None,
         path_to_config_monkey_patch: Optional[str] = None,
-        use_experts: Optional[str] = None, 
         **kwargs,
     ):
         super().__init__()
@@ -78,11 +76,22 @@ class VLLM(TemplateLM):
                 "attempted to use 'vllm' LM type, but package `vllm` is not installed. "
                 "Please install vllm via `pip install lm-eval[vllm]` or `pip install -e .[vllm]`"
             )
+        
+        # Model Monkey Patch
+        if path_to_modeling_monkey_patch is not None and path_to_config_monkey_patch is not None:
+            from lm_eval.models.utils import load_monkey_patch_module
+            apply_modeling = getattr(
+                load_monkey_patch_module(path_to_modeling_monkey_patch), "apply"
+            )
+            apply_config = getattr(
+                load_monkey_patch_module(path_to_config_monkey_patch), "apply"
+            )
+            eval_logger.info(
+                f"Init ds distributed, applying modeling monkey {apply_modeling} patch from {path_to_modeling_monkey_patch}, applying config monkey patch {apply_config} from {path_to_config_monkey_patch}"
+            )
+            apply_modeling()
+            apply_config()
 
-        self.use_experts = use_experts
-        self.path_to_modeling_monkey_patch = path_to_modeling_monkey_patch
-        self.path_to_config_monkey_patch = path_to_config_monkey_patch
-    
         assert (
             max_length is None or max_model_len is None
         ), "Either max_length or max_model_len may be provided, but not both"
@@ -112,7 +121,7 @@ class VLLM(TemplateLM):
             else int(batch_size)
         )
         if self.data_parallel_size <= 1:
-            self.model = self.get_model()
+            self.model = LLM(**self.model_args)
         else:
             eval_logger.warning(
                 "You might experience occasional issues with model weight downloading when data_parallel is in use. To ensure stable performance, run with data_parallel_size=1 until the weights are downloaded and cached."
@@ -158,97 +167,6 @@ class VLLM(TemplateLM):
             self.lora_request = LoRARequest("finetuned", 1, lora_local_path)
         else:
             self.lora_request = None
-
-
-    def apply_fpm_vllm_patch(self, do_config=False):
-        if self.path_to_modeling_monkey_patch is None or self.path_to_config_monkey_patch is None:
-            return None
-        from lm_eval.models.utils import load_monkey_patch_module
-
-        apply_modeling = getattr(
-            load_monkey_patch_module(self.path_to_modeling_monkey_patch), "apply"
-        )
-        eval_logger.info(
-            f"Applying modeling monkey {apply_modeling} patch from {self.path_to_modeling_monkey_patch}"
-        )
-        result = (apply_modeling(),)
-
-        if do_config: # 取决于是否把config补丁也写在了modeling文件中
-            apply_config = getattr(
-                load_monkey_patch_module(self.path_to_config_monkey_patch), "apply"
-            )
-            eval_logger.info(
-                f"Applying config monkey patch {apply_config} from {self.path_to_config_monkey_patch}"
-            )
-
-            result = (result, apply_config()) # config patch is in the same file of modeling
-        return result
-
-
-    def get_model(self):
-        def _get_function_to_expert_indices(self):
-            function_to_expert_indices = getattr(self.model.config, "function_to_expert_indices", None)
-            # print(f"Got {function_to_expert_indices=}")
-            return function_to_expert_indices
-        def _create_experts_mask_from_parsed_str(use_experts, function_to_expert_indices, device):
-            import torch
-            if function_to_expert_indices is None:
-                return None
-
-            def _flex_get_item(_list, key):
-                if key == -1:
-                    return _list
-                elif isinstance(_list, list):
-                    return [_list[i] for i in key]
-                else:
-                    return _list[key]
-            
-            # Get all expert indices once
-            all_expert_indices = sum(function_to_expert_indices.values(), [])
-            num_experts = len(all_expert_indices)
-            
-            # Collect expert indices
-            expert_indices = []
-            for func, local_ids in use_experts.items():
-                assert local_ids == -1, NotImplementedError
-                global_expert_indices = function_to_expert_indices[func]
-                expert_indices += _flex_get_item(global_expert_indices, local_ids)
-
-            # Handle empty case
-            if not expert_indices:  # if not assigned, parsed use_experts is {}, should be specially dealt
-                experts_mask = torch.zeros((1, num_experts), dtype=torch.float32, device=device)
-            else:
-                # Optimized mask creation: create on CPU first, then move to device
-                # This is faster for large tensors
-                experts_mask = torch.full(
-                    (1, num_experts), 
-                    float("-inf"), 
-                    dtype=torch.float32
-                )
-                # Set values directly using indexing (more efficient than scatter)
-                experts_mask[0, expert_indices] = 0.0
-                # Move to device once
-                experts_mask = experts_mask.to(device)
-            
-            return experts_mask
-
-        eval_logger.info(f"Getting model with {self.model_args=}")
-        if self.path_to_config_monkey_patch is None and self.path_to_modeling_monkey_patch is None:
-            return LLM(**self.model_args)
-        if self.path_to_config_monkey_patch is not None and self.path_to_modeling_monkey_patch is not None:
-            # Integrated logic for vllm fpm patch application with normal initialization by vllm.LLM, device determined, expert mask loaded
-            self.apply_fpm_vllm_patch(do_config=True)
-            llm = LLM(**self.model_args)
-            if self.use_experts:
-                expert_mask = _create_experts_mask_from_parsed_str(
-                    use_experts=self.use_experts, 
-                    function_to_expert_indices=self._get_function_to_expert_indices()
-                )
-                llm.set_expert_mask(expert_mask)
-                eval_logger.info(f"llm set expert mask to {expert_mask}")
-            return llm
-        raise ValueError("`path_to_config_monkey_patch` and `path_to_modeling_monkey_patch` should either be both present, or both absent")
-
 
     @property
     def eot_token_id(self):
@@ -348,17 +266,15 @@ class VLLM(TemplateLM):
             # vLLM hangs if resources are set in ray.remote
             # also seems to only work with decorator and not with ray.remote() fn
             # see https://github.com/vllm-project/vllm/issues/973
-            # NOTE: for npu, original cuda deprecated
+            # NOTE: for npu
             @ray.remote(resources={"NPU": 1})
             def run_inference_one_model(
                 model_args: dict,
                 sampling_params: SamplingParams,
                 requests: List[List[int]],
                 lora_request: LoRARequest,
-                device_id: int
             ):
-                os.environ["ASCEND_RT_VISIBLE_DEVICES"] = str(device_id) # fix bug on repeatedly spwaning proc on same device, causing OOM
-                llm = self.get_model()
+                llm = LLM(**model_args)
                 return llm.generate(
                     prompt_token_ids=requests,
                     sampling_params=sampling_params,
@@ -367,13 +283,10 @@ class VLLM(TemplateLM):
 
             # dispatch requests to all self.data_parallel_size workers, in interleaved fashion
             # interleaved important to balance context lengths across workers
-            # NOTE: inputs are added with device id as auxiliary argument, for NPU
             requests = [list(x) for x in distribute(self.data_parallel_size, requests)]
-            devices = os.environ["ASCEND_RT_VISIBLE_DEVICES"]
-            eval_logger.info(f"Data parallel initializing on device {devices}")
             inputs = (
-                (self.model_args, sampling_params, req, self.lora_request, devices.split(",")[i])
-                for i, req in enumerate(requests)
+                (self.model_args, sampling_params, req, self.lora_request)
+                for req in requests
             )
             object_refs = [run_inference_one_model.remote(*x) for x in inputs]
             results = ray.get(object_refs)
@@ -382,7 +295,6 @@ class VLLM(TemplateLM):
             # flatten results
             return undistribute(results)
 
-        # no need to consider fpm patch, as the `self.model` is already patched
         outputs = self.model.generate(
             prompt_token_ids=requests,
             sampling_params=sampling_params,
@@ -463,17 +375,10 @@ class VLLM(TemplateLM):
     def generate_until(
         self, requests: List[Instance], disable_tqdm: bool = False
     ) -> List[str]:
-
-        # NOTE: ascend debug
-        import subprocess
-        print(f"`npu-smi info`:\n{subprocess.run('npu-smi info', shell=True, text=True, capture_output=True).stdout}")
-        print(f"`pgrep -af python`:\n{subprocess.run('pgrep -af python', shell=True, text=True, capture_output=True).stdout}")
-
         res = []
 
         # batch tokenize contexts
-        context, all_gen_kwargs = zip(*(req.args for req in requests)) # TODO: req.args is now appended with use_experts, vllm not compatible with huggingface
-        # context, all_gen_kwargs, _ = zip(*(req.args for req in requests))
+        context, all_gen_kwargs = zip(*(req.args for req in requests))
         context_encoding: List[List[int]] = self.tok_encode(
             context, add_special_tokens=self.add_bos_token
         )

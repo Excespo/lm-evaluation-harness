@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -e
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 source /usr/local/Ascend/nnal/atb/set_env.sh
 export HF_ENDPOINT=https://hf-mirror.com 
@@ -10,12 +10,25 @@ export HCCL_EXEC_TIMEOUT=4800
 modeling_patch=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/src/model/moe_monkey_patch.py
 config_patch=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/src/model/config_patch.py
 
-accelerate launch -m lm_eval --model hf --batch_size 8 \
-    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/fpm/Qwen2.5-MoE-5.7B-clone-no-shared-medical-as-common-init,dtype=bfloat16,path_to_modeling_monkey_patch=$modeling_patch,path_to_config_monkey_patch=$config_patch \
-    --tasks nq_open  --num_fewshot 5 \
-    --log_samples --output_path outputs/verify_infer/nq_open --use_experts medical
+# accelerate launch -m lm_eval --model hf --batch_size 8 \
+#     --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/fpm/Qwen2.5-MoE-5.7B-clone-no-shared-medical-as-common-init,dtype=bfloat16,path_to_modeling_monkey_patch=$modeling_patch,path_to_config_monkey_patch=$config_patch \
+#     --tasks nq_open  --num_fewshot 5 \
+#     --log_samples --output_path outputs/verify_infer/nq_open --use_experts medical
+
+# accelerate launch -m lm_eval --model hf --batch_size 8 \
+#     --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/Qwen2.5-Cpt-Medical-1.5B-final,dtype=bfloat16 \
+#     --tasks nq_open  --num_fewshot 5 \
+#     --log_samples --output_path outputs/verify_infer/nq_open
+
+
+# accelerate launch -m lm_eval --model hf --batch_size 8 \
+#     --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/outputs/ckpts/init/Qwen2.5-MoE-6.8B-en-wiki-init-0+1-clone-culture,dtype=bfloat16,path_to_modeling_monkey_patch=$modeling_patch,path_to_config_monkey_patch=$config_patch \
+#     --tasks nq_open  --num_fewshot 0 \
+#     --log_samples --output_path outputs/verify_infer/nq_open --use_experts culture
+# acc = 7.67%
 
 accelerate launch -m lm_eval --model hf --batch_size 8 \
-    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/ckpts/Qwen2.5-Cpt-Medical-1.5B-final,dtype=bfloat16 \
-    --tasks nq_open  --num_fewshot 5 \
+    --model_args pretrained=/aistor/sjtu/hpc_stor01/home/luoyijie/src/FPM/outputs/ckpts/Qwen2.5-1.5B-Cpt-culture_final,dtype=bfloat16 \
+    --tasks nq_open  --num_fewshot 0 \
     --log_samples --output_path outputs/verify_infer/nq_open
+# acc = 7.67%
